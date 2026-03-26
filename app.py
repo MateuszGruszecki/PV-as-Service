@@ -130,4 +130,149 @@ def get_moc_daily(sub_df, col):
     e_sz, e_d = sub_df[sub_df['Is_Szczyt_Mocowy']][col].sum(), sub_df[col].sum()
     if e_d < 0.1: return pd.Series({'Koszt': 0.0, 'Mnożnik': 0.17, 'L': 0.0})
     l_f = (e_sz / e_d) - 0.625
-    mn = 0.17 if l_f <= 0.05 else (0.50 if l_f <= 0.10 else (0.83 if l_f <= 0.15 else
+    mn = 0.17 if l_f <= 0.05 else (0.50 if l_f <= 0.10 else (0.83 if l_f <= 0.15 else 1.00))
+    return pd.Series({'Koszt': e_sz * STAWKA_MOCOWA_BAZOWA * mn, 'Mnożnik': mn, 'L': l_f})
+
+moc_po = df.groupby('Data_Klucz').apply(lambda x: get_moc_daily(x, 'Nowy_Pobór'))
+moc_pre = df.groupby('Data_Klucz').apply(lambda x: get_moc_daily(x, 'Pobór'))
+
+total_m_pre_y1, total_m_po_y1 = moc_pre['Koszt'].sum(), moc_po['Koszt'].sum()
+zysk_mocowy_y1 = total_m_pre_y1 - total_m_po_y1 
+
+zyski_sieciowe_brutto_total_y1 = zyski_sieciowe_energia_dyst_y1 + zysk_mocowy_y1
+
+# ==============================================================================
+# JĄDRO OBLICZENIOWE PVaaS: SYMULACJA DŁUGOTERMINOWA (PĘTLA CZASU)
+# ==============================================================================
+
+abonament_roczny_pln_y1 = real_y1_produkcja_mwh * cena_pvaas_eur * kurs_eur
+
+dane_symulacji = []
+skumulowany_zysk = 0.0
+
+aktualna_roczna_produkcja_mwh = real_y1_produkcja_mwh
+aktualna_roczna_autokonsumpcja_mwh = real_y1_autokonsumpcja_mwh 
+
+# KLUCZOWA ZMIANA BIZNESOWA: Wyliczamy wartość "najdroższych" unikniętych stref z 1 roku
+# Dzięki temu wyliczenia na kolejne lata respektują to, że PV oszczędza najdroższy prąd dzienny.
+wartosc_uniknietej_mwh_pradu = oszczednosc_energia_y1 / real_y1_autokonsumpcja_mwh if real_y1_autokonsumpcja_mwh > 0 else 0
+wartosc_uniknietej_mwh_dyst = oszczednosc_dystrybucja_y1 / real_y1_autokonsumpcja_mwh if real_y1_autokonsumpcja_mwh > 0 else 0
+
+aktualna_wartosc_pradu = wartosc_uniknietej_mwh_pradu
+aktualna_wartosc_dyst = wartosc_uniknietej_mwh_dyst
+aktualny_indeks_mocowy = 1.0  
+aktualny_abonament = abonament_roczny_pln_y1
+
+for rok in range(1, okres_umowy + 1):
+    f_prod_rok = aktualna_roczna_produkcja_mwh
+    f_auto_rok = aktualna_roczna_autokonsumpcja_mwh
+    
+    # Oszczędność na Energii i Dystrybucji (z zachowaniem proporcji drogich stref dziennych)
+    zysk_brutto_prad = f_auto_rok * aktualna_wartosc_pradu
+    zysk_brutto_dyst = f_auto_rok * aktualna_wartosc_dyst
+    zysk_energia_dyst = zysk_brutto_prad + zysk_brutto_dyst
+    
+    # Oszczędność Mocowa
+    wspolczynnik_degradacji_szczytow = aktualna_roczna_produkcja_mwh / real_y1_produkcja_mwh
+    zysk_mocowy_rok = zysk_mocowy_y1 * wspolczynnik_degradacji_szczytow * aktualny_indeks_mocowy
+    
+    # Zysk Całkowity
+    total_zysk_siec_rok = zysk_energia_dyst + zysk_mocowy_rok
+    koszt_pvaas_rok = aktualny_abonament
+    
+    zysk_netto_rok = total_zysk_siec_rok - koszt_pvaas_rok
+    skumulowany_zysk += zysk_netto_rok
+    
+    dane_symulacji.append({
+        "Rok": rok,
+        "Produkcja PV (MWh)": f_prod_rok,
+        "Oszcz. Energia i Dystryb. (PLN)": zysk_energia_dyst,
+        "Oszcz. Mocowa (PLN)": zysk_mocowy_rok,
+        "Suma Oszczędności Brutto (PLN)": total_zysk_siec_rok,
+        "Koszt PVaaS (PLN)": koszt_pvaas_rok,
+        "Zysk Klienta Netto (PLN)": zysk_netto_rok,
+        "Skumulowany Zysk (PLN)": skumulowany_zysk
+    })
+    
+    # Waloryzacja na kolejny rok
+    aktualna_wartosc_pradu *= (1 + wzrost_cen_pradu)
+    aktualna_wartosc_dyst *= (1 + wzrost_cen_pradu)
+    aktualny_indeks_mocowy *= (1 + wzrost_oplaty_mocowej) 
+    aktualny_abonament *= (1 + wzrost_abonamentu)
+    aktualna_roczna_produkcja_mwh *= (1 - degradacja_pv)
+    aktualna_roczna_autokonsumpcja_mwh *= (1 - degradacja_pv)
+
+df_sym_final = pd.DataFrame(dane_symulacji)
+
+# ==============================================================================
+# SEKCJA WYŚWIETLANIA WYNIKÓW (GUI)
+# ==============================================================================
+
+st.subheader("💡 Szczegółowy Bilans Profilu (Rok 1)")
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Produkcja z PV", f"{real_y1_produkcja_mwh:,.0f} MWh/rok")
+c2.metric("Oszcz. Energia i Dyst.", f"{zyski_sieciowe_energia_dyst_y1:,.2f} PLN", "Z precyzyjnym podziałem na strefy!")
+c3.metric("Oszcz. z Opłaty Mocowej", f"{zysk_mocowy_y1:,.2f} PLN")
+c4.metric("Suma Oszczędności Brutto", f"{zyski_sieciowe_brutto_total_y1:,.2f} PLN")
+
+st.markdown("---")
+st.subheader(f"📈 Symulacja Finansowa PVaaS na okres {okres_umowy} lat")
+c_m1, c_m2, c_m3 = st.columns(3)
+with c_m1: st.metric("Roczny abonament PVaaS (Rok 1)", f"{abonament_roczny_pln_y1:,.2f} PLN", "Indeksowany o inflację")
+with c_m2: st.metric("Łączna Oszcz. Mocowa w czasie", f"{df_sym_final['Oszcz. Mocowa (PLN)'].sum():,.2f} PLN", f"Wzrost o {wzrost_oplaty_mocowej*100:.0f}% rocznie")
+with c_m3: st.metric("SKUMULOWANY ZYSK KLIENTA NETTO", f"{skumulowany_zysk:,.2f} PLN", "Zysk czysty")
+
+# Wykres przepływów 
+fig = go.Figure()
+fig.add_trace(go.Bar(x=df_sym_final["Rok"], y=df_sym_final["Oszcz. Energia i Dystryb. (PLN)"], name="Oszcz. Energia + Dystrybucja", marker_color='#27AE60'))
+fig.add_trace(go.Bar(x=df_sym_final["Rok"], y=df_sym_final["Oszcz. Mocowa (PLN)"], name="Oszczędność Mocowa", marker_color='#F1C40F'))
+fig.add_trace(go.Bar(x=df_sym_final["Rok"], y=-df_sym_final["Koszt PVaaS (PLN)"], name="Opłata PVaaS (Koszt)", marker_color='#E74C3C'))
+fig.add_trace(go.Scatter(x=df_sym_final["Rok"], y=df_sym_final["Skumulowany Zysk (PLN)"], name="Skumulowany Zysk Netto", mode='lines+markers', line=dict(color='#2980B9', width=3), yaxis="y2"))
+fig.update_layout(barmode='relative', title="Struktura Zysków Brutto vs Opłata PVaaS", xaxis=dict(title="Rok", tickmode='linear'), yaxis=dict(title="Kwota roczna (PLN)"), yaxis2=dict(title="Zysk skumulowany (PLN)", overlaying='y', side='right'), legend=dict(x=0.01, y=0.99), template="plotly_white", hovermode="x unified")
+st.plotly_chart(fig, use_container_width=True)
+
+# --- TABELA DANYCH I POBIERANIE ---
+st.markdown("---")
+st.subheader("📋 Szczegółowa tabela symulacji PVaaS")
+
+df_formatted = df_sym_final.copy()
+for col in df_formatted.columns:
+    if col == "Produkcja PV (MWh)": df_formatted[col] = df_formatted[col].apply(lambda x: f"{x:,.1f}".replace(",", " "))
+    elif col != "Rok": df_formatted[col] = df_formatted[col].apply(lambda x: f"{x:,.2f} PLN".replace(",", " "))
+st.dataframe(df_formatted.set_index("Rok"), use_container_width=True)
+
+# EKSPORT DO EXCELA 
+def create_excel_pvaas(df_sym, moc, prod_y1, auto_y1, sub_y1):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df_sym.to_excel(writer, sheet_name='Symulacja_PVaaS', index=False)
+        workbook = writer.book
+        worksheet = writer.sheets['Symulacja_PVaaS']
+        
+        header_fmt = workbook.add_format({'bold': True, 'bg_color': '#D7E4BC', 'border': 1})
+        num_fmt = workbook.add_format({'num_format': '#,##0.00 "PLN"', 'border': 1})
+        prod_fmt = workbook.add_format({'num_format': '#,##0.0 "MWh"', 'border': 1})
+        
+        for col_num, value in enumerate(df_sym.columns.values):
+            worksheet.write(0, col_num, value, header_fmt)
+        
+        for row in range(1, len(df_sym) + 1):
+            worksheet.write(row, 0, df_sym.iloc[row-1, 0]) 
+            worksheet.write(row, 1, df_sym.iloc[row-1, 1], prod_fmt) 
+            worksheet.write(row, 2, df_sym.iloc[row-1, 2], num_fmt) 
+            worksheet.write(row, 3, df_sym.iloc[row-1, 3], num_fmt) 
+            worksheet.write(row, 4, df_sym.iloc[row-1, 4], num_fmt) 
+            worksheet.write(row, 5, df_sym.iloc[row-1, 5], num_fmt) 
+            worksheet.write(row, 6, df_sym.iloc[row-1, 6], num_fmt) 
+            worksheet.write(row, 7, df_sym.iloc[row-1, 7], num_fmt) 
+        
+        worksheet.set_column('A:A', 5)
+        worksheet.set_column('B:H', 20)
+        
+        worksheet_p = workbook.add_worksheet('Założenia')
+        par_data = [['Wielkość Instalacji', moc, 'kWp'],['Produkcja (Rok 1)', prod_y1, 'MWh'],['Autokonsumpcja (Rok 1)', auto_y1, 'MWh'],['Abonament roczny (Rok 1)', sub_y1, 'PLN']]
+        for row, data in enumerate(par_data): worksheet_p.write(row, 0, data[0]); worksheet_p.write(row, 1, data[1]); worksheet_p.write(row, 2, data[2])
+        
+    return output.getvalue()
+
+st.download_button(label="📥 Pobierz raport Excel (Pelna Symulacja)", data=create_excel_pvaas(df_sym_final, moc_pv, real_y1_produkcja_mwh, real_y1_autokonsumpcja_mwh, abonament_roczny_pln_y1), file_name=f"Raport_PVaaS_{moc_pv}kWp_{okres_umowy}lat.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
