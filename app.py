@@ -13,8 +13,15 @@ except ImportError:
     HAS_HOLIDAYS = False
 
 # --- KONFIGURACJA STRONY ---
-st.set_page_config(page_title="Audyt PVaaS B2B", layout="wide")
-st.title("⚡ Profesjonalny Audyt PV as a Service: Profil Klienta i Symulacja Długoterminowa")
+st.set_page_config(page_title="Audyt PVaaS", layout="wide")
+
+# Wstawienie logo (z obsługą błędów, jeśli plik jeszcze nie został wgrany na GitHub)
+try:
+    st.image("logo.png", width=250)
+except Exception:
+    pass
+
+st.title("⚡ Audyt PV as a Service: Profil Klienta i Symulacja Długoterminowa")
 st.markdown("Model: **Czysty OPEX (0 PLN na start)** | Realne dane strefowe | Waloryzacja Mocowa 10%")
 
 # --- ZAŁOŻENIA STAŁE (CENNIKI OSD) ---
@@ -154,7 +161,6 @@ aktualna_roczna_produkcja_mwh = real_y1_produkcja_mwh
 aktualna_roczna_autokonsumpcja_mwh = real_y1_autokonsumpcja_mwh 
 
 # KLUCZOWA ZMIANA BIZNESOWA: Wyliczamy wartość "najdroższych" unikniętych stref z 1 roku
-# Dzięki temu wyliczenia na kolejne lata respektują to, że PV oszczędza najdroższy prąd dzienny.
 wartosc_uniknietej_mwh_pradu = oszczednosc_energia_y1 / real_y1_autokonsumpcja_mwh if real_y1_autokonsumpcja_mwh > 0 else 0
 wartosc_uniknietej_mwh_dyst = oszczednosc_dystrybucja_y1 / real_y1_autokonsumpcja_mwh if real_y1_autokonsumpcja_mwh > 0 else 0
 
@@ -251,7 +257,7 @@ def create_excel_pvaas(df_sym, moc, prod_y1, auto_y1, sub_y1):
         
         header_fmt = workbook.add_format({'bold': True, 'bg_color': '#D7E4BC', 'border': 1})
         num_fmt = workbook.add_format({'num_format': '#,##0.00 "PLN"', 'border': 1})
-        prod_fmt = workbook.add_format({'num_format': '#,##0.0 "MWh"', 'border': 1})
+        prod_fmt = workbook.add_format({'num_format': '#,##0.00 "MWh"', 'border': 1})
         
         for col_num, value in enumerate(df_sym.columns.values):
             worksheet.write(0, col_num, value, header_fmt)
