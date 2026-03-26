@@ -300,4 +300,16 @@ def create_excel_pvaas(df_sym, moc, prod_y1, auto_y1, sub_y1):
             worksheet.write(row, 5, df_sym.iloc[row-1, 5], num_fmt) 
             worksheet.write(row, 6, df_sym.iloc[row-1, 6], num_fmt) 
             worksheet.write(row, 7, df_sym.iloc[row-1, 7], num_fmt) 
-            worksheet.write(row, 8, df_sym.iloc[row
+            worksheet.write(row, 8, df_sym.iloc[row-1, 8], num_fmt) 
+        
+        worksheet.set_column('A:A', 5)
+        worksheet.set_column('B:B', 22)
+        worksheet.set_column('C:I', 18)
+        
+        worksheet_p = workbook.add_worksheet('Założenia')
+        par_data = [['Wielkość Instalacji', moc, 'kWp'],['Produkcja (Rok 1)', prod_y1, 'MWh'],['Autokonsumpcja (Rok 1)', auto_y1, 'MWh'],['Abonament roczny (Rok 1)', sub_y1, 'PLN']]
+        for row, data in enumerate(par_data): worksheet_p.write(row, 0, data[0]); worksheet_p.write(row, 1, data[1]); worksheet_p.write(row, 2, data[2])
+        
+    return output.getvalue()
+
+st.download_button(label="📥 Pobierz raport Excel", data=create_excel_pvaas(df_sym_final, moc_pv, real_y1_produkcja_mwh, real_y1_autokonsumpcja_mwh, abonament_roczny_pln_y1), file_name=f"Raport_PVaaS_{moc_pv}kWp_{cykl_zycia}lat.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
