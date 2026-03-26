@@ -282,8 +282,8 @@ def create_excel_pvaas(df_sym, moc, prod_y1, auto_y1, sub_y1):
         worksheet.set_column('A:A', 5)
         worksheet.set_column('B:G', 20)
         
-        # Dodatkowy arkusz z parametrami
-        worksheet_p = workbook.add_add_sheet('Założenia')
+        # Dodatkowy arkusz z parametrami (Z POPRAWIONĄ FUNKCJĄ)
+        worksheet_p = workbook.add_worksheet('Założenia')
         par_data = [['Wielkość Instalacji', moc, 'kWp'],['Produkcja (Rok 1)', prod_y1, 'MWh'],['Autokonsumpcja (Rok 1)', auto_y1, 'MWh'],['Abonament roczny (Rok 1)', sub_y1, 'PLN']]
         for row, data in enumerate(par_data): worksheet_p.write(row, 0, data[0]); worksheet_p.write(row, 1, data[1]); worksheet_p.write(row, 2, data[2])
         
